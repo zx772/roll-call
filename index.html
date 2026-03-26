@@ -151,6 +151,37 @@
             text-shadow: 0 2px 10px rgba(99, 102, 241, 0.3);
         }
         
+        #multiDisplay {
+            font-size: 3rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 20px 0;
+            min-height: 150px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .multi-name {
+            padding: 10px 25px;
+            background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(139,92,246,0.2));
+            border: 2px solid rgba(99,102,241,0.4);
+            border-radius: 15px;
+            animation: popIn 0.5s ease;
+        }
+        
+        @keyframes popIn {
+            0% { transform: scale(0); opacity: 0; }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
         #nameDisplay.rolling {
             animation: roll 0.1s infinite alternate, pulse 2s infinite ease-in-out;
         }
@@ -616,11 +647,25 @@
                 </div>
                 
                 <div class="controls">
-                    <button class="btn" onclick="startRolling()" id="startBtn">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-right: 15px;">
+                        <span style="color: var(--muted);">抽</span>
+                        <select id="pickCount" style="background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.3); color: #fff; padding: 8px 12px; border-radius: 8px; font-size: 1rem;">
+                            <option value="1">1人</option>
+                            <option value="2">2人</option>
+                            <option value="3">3人</option>
+                            <option value="4">4人</option>
+                            <option value="5">5人</option>
+                            <option value="6">6人</option>
+                        </select>
+                    </div>
+                    <button class="btn" onclick="handleRoll()" id="startBtn">
                         <span>🎲</span> 开始点名
                     </button>
                     <button class="btn" onclick="toggleVoice()" id="voiceBtn">
                         <span>🔊</span> 朗读
+                    </button>
+                    <button class="btn" style="background: linear-gradient(135deg, #10b981, #059669);" onclick="startGroupRoll()" id="groupBtn">
+                        <span>👥</span> 小组抽签
                     </button>
                 </div>
                 
@@ -699,6 +744,15 @@
                 <label>背景图标 URL</label>
                 <input type="text" class="form-input" id="bgIcon" placeholder="输入图标链接">
             </div>
+            
+            <div class="form-group">
+                <label>📋 小组设置 (格式: 组名-成员1,成员2,成员3 每行一组)</label>
+                <textarea class="form-input" id="groupNames" rows="6" placeholder="示例:
+第1组-张三,李四,王五
+第2组-赵六,孙七,周八
+第3组-吴九,郑十"></textarea>
+            </div>
+            
             <button class="btn" style="width: 100%;" onclick="saveSettings()">保存设置</button>
         </div>
     </div>
@@ -781,6 +835,20 @@
             document.getElementById('rollTime').value = settings.rollTime;
             document.getElementById('bgImage').value = settings.bgImage;
             document.getElementById('bgIcon').value = settings.bgIcon;
+            
+            // 加载小组设置
+            const savedGroups = localStorage.getItem('rollCall_groups');
+            if (savedGroups) {
+                groupSettings = JSON.parse(savedGroups);
+            }
+            
+            // 显示小组设置
+            if (Object.keys(groupSettings).length > 0) {
+                const groupText = Object.entries(groupSettings)
+                    .map(([group, members]) => `${group}-${members.join(',')}`)
+                    .join('\n');
+                document.getElementById('groupNames').value = groupText;
+            }
         }
         
         // 保存数据
@@ -792,6 +860,15 @@
         }
         
         // 开始点名
+        function handleRoll() {
+            const pickCount = parseInt(document.getElementById('pickCount').value);
+            if (pickCount > 1) {
+                startMultiRoll();
+            } else {
+                startRolling();
+            }
+        }
+        
         function startRolling() {
             if (isRolling) {
                 stopRolling();
@@ -896,6 +973,159 @@
                 utterance.rate = 0.9;
                 speechSynthesis.speak(utterance);
             }
+        }
+        
+        // 多人抽签
+        let multiRolling = false;
+        let multiInterval = null;
+        
+        function startMultiRoll() {
+            if (isRolling || multiRolling) {
+                stopMultiRoll();
+                return;
+            }
+            
+            const pickCount = parseInt(document.getElementById('pickCount').value);
+            
+            if (students.length === 0) {
+                showToast('请先添加学生名单！', 'warning');
+                return;
+            }
+            
+            if (pickCount > students.length) {
+                showToast('抽取人数不能超过总人数！', 'warning');
+                return;
+            }
+            
+            multiRolling = true;
+            document.getElementById('startBtn').classList.add('rolling');
+            document.getElementById('startBtn').innerHTML = '<span>⏹️</span> 停止';
+            
+            // 滚动显示
+            const display = document.getElementById('nameDisplay');
+            display.innerHTML = '<span style="color: var(--muted);">准备中...</span>';
+            
+            multiInterval = setInterval(() => {
+                const shuffled = [...students].sort(() => Math.random() - 0.5).slice(0, pickCount);
+                display.innerHTML = shuffled.map(name => `<span class="multi-name">${name}</span>`).join('');
+            }, 80);
+            
+            // 3秒后停止
+            setTimeout(() => {
+                stopMultiRoll();
+            }, 3000);
+        }
+        
+        function stopMultiRoll() {
+            if (!multiRolling) return;
+            
+            clearInterval(multiInterval);
+            multiRolling = false;
+            
+            const pickCount = parseInt(document.getElementById('pickCount').value);
+            
+            // 选择多个结果
+            const shuffled = [...students].sort(() => Math.random() - 0.5);
+            const winners = shuffled.slice(0, pickCount);
+            
+            // 显示结果
+            const display = document.getElementById('nameDisplay');
+            display.classList.remove('rolling');
+            display.innerHTML = winners.map(name => `<span class="multi-name">${name}</span>`).join('');
+            
+            document.getElementById('startBtn').classList.remove('rolling');
+            document.getElementById('startBtn').innerHTML = '<span>🎲</span> 开始点名';
+            
+            // 记录历史
+            const now = new Date();
+            const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+            
+            winners.forEach(name => {
+                callHistory.unshift({ name, time: timeString });
+                callCounts[name] = (callCounts[name] || 0) + 1;
+            });
+            
+            if (callHistory.length > 20) {
+                callHistory = callHistory.slice(0, 20);
+            }
+            
+            saveData();
+            updateStats();
+            renderHistory();
+            renderWinners();
+            
+            createConfetti();
+            playSuccessSound();
+            
+            // 朗读所有名字
+            if (voiceEnabled) {
+                winners.forEach((name, i) => {
+                    setTimeout(() => speakName(name), i * 1500);
+                });
+            }
+            
+            showToast(`🎉 ${winners.join('、')} 被抽中！`, 'success');
+        }
+        
+        // 小组抽签
+        let groupRolling = false;
+        let groupInterval = null;
+        
+        function startGroupRoll() {
+            if (isRolling || multiRolling || groupRolling) {
+                stopGroupRoll();
+                return;
+            }
+            
+            if (Object.keys(groupSettings).length === 0) {
+                showToast('请先在管理面板设置小组！', 'warning');
+                return;
+            }
+            
+            groupRolling = true;
+            document.getElementById('groupBtn').innerHTML = '<span>⏹️</span> 停止';
+            
+            const groupNames = Object.keys(groupSettings);
+            const display = document.getElementById('nameDisplay');
+            
+            groupInterval = setInterval(() => {
+                const randomGroup = groupNames[Math.floor(Math.random() * groupNames.length)];
+                const members = groupSettings[randomGroup];
+                const randomMember = members[Math.floor(Math.random() * members.length)];
+                display.innerHTML = `<div style="text-align: center;"><div style="font-size: 1.5rem; color: var(--muted); margin-bottom: 10px;">第 ${randomGroup} 组</div><span class="multi-name">${randomMember}</span></div>`;
+            }, 100);
+            
+            // 4秒后停止
+            setTimeout(() => {
+                stopGroupRoll();
+            }, 4000);
+        }
+        
+        function stopGroupRoll() {
+            if (!groupRolling) return;
+            
+            clearInterval(groupInterval);
+            groupRolling = false;
+            
+            document.getElementById('groupBtn').innerHTML = '<span>👥</span> 小组抽签';
+            
+            // 选择最终小组
+            const groupNames = Object.keys(groupSettings);
+            const winnerGroup = groupNames[Math.floor(Math.random() * groupNames.length)];
+            const members = groupSettings[winnerGroup];
+            const winner = members[Math.floor(Math.random() * members.length)];
+            
+            const display = document.getElementById('nameDisplay');
+            display.innerHTML = `<div style="text-align: center;"><div style="font-size: 2rem; background: linear-gradient(135deg, #f472b6, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 15px;">🎉 第 ${winnerGroup} 组 🎉</div><div style="font-size: 3rem; font-weight: 900; color: #fff;">${winner}</div><div style="font-size: 1rem; color: var(--muted); margin-top: 10px;">小组成员: ${members.join('、')}</div></div>`;
+            
+            createConfetti();
+            playSuccessSound();
+            
+            if (voiceEnabled) {
+                setTimeout(() => speakName(`第${winnerGroup}组，${winner}`), 500);
+            }
+            
+            showToast(`🎉 第 ${winnerGroup} 组 ${winner} 被抽中！`, 'success');
         }
         
         // 切换语音
@@ -1072,6 +1302,24 @@
             settings.rollTime = parseInt(document.getElementById('rollTime').value) || 2;
             settings.bgImage = document.getElementById('bgImage').value.trim() || settings.bgImage;
             settings.bgIcon = document.getElementById('bgIcon').value.trim() || settings.bgIcon;
+            
+            // 解析小组设置
+            const groupText = document.getElementById('groupNames').value.trim();
+            if (groupText) {
+                const lines = groupText.split('\n').filter(line => line.trim());
+                groupSettings = {};
+                lines.forEach(line => {
+                    const [groupName, membersStr] = line.split('-');
+                    if (groupName && membersStr) {
+                        const members = membersStr.split(',').map(m => m.trim()).filter(m => m);
+                        groupSettings[groupName.trim()] = members;
+                    }
+                });
+                localStorage.setItem('rollCall_groups', JSON.stringify(groupSettings));
+            } else {
+                groupSettings = {};
+                localStorage.removeItem('rollCall_groups');
+            }
             
             // 应用新背景
             document.body.style.backgroundImage = `linear-gradient(rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.9)), url("${settings.bgImage}")`;
